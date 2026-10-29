@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Popcorn 3D</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Outfit:wght@400;600&display=swap">
+<style>
+:root{--ink:#1c0d05;--btn:#c8201e;box-sizing:border-box}
+*{box-sizing:inherit;margin:0}
+html,body{height:100%;overflow:hidden;background:#050505;font-family:Outfit,system-ui,sans-serif;color:var(--ink)}
+#bg{position:fixed;inset:0;background-color:#050505;transition:background-color 1.4s}
+#bg::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at 35% 45%,rgba(255,255,255,.28),transparent 60%),linear-gradient(transparent 60%,rgba(0,0,0,.22))}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+.ui{position:fixed;opacity:0;pointer-events:none;transition:opacity 1s}
+.ui.on{opacity:1;pointer-events:auto}
+#tabs{top:calc(env(safe-area-inset-top,0px) + 22px);left:50%;transform:translateX(-50%);display:flex;gap:8px}
+#tabs button{font:600 13px Outfit,sans-serif;padding:8px 16px;border-radius:99px;border:1px solid rgba(0,0,0,.25);background:rgba(255,255,255,.4);color:var(--ink);cursor:pointer;white-space:nowrap}
+#tabs button[aria-selected=true]{background:var(--ink);color:#fff}
+#copy{right:7vw;top:50%;transform:translateY(-50%);width:min(400px,40vw)}
+h1{font:400 clamp(52px,8vw,112px)/.92 Anton,Impact,sans-serif;text-transform:uppercase;transition:transform .4s,opacity .4s}
+#copy p{margin:18px 0;font-size:15px;line-height:1.55;transition:opacity .4s}
+.sw{opacity:0;transform:translateY(14px)}
+#sizes{display:flex;gap:8px;margin-bottom:22px}
+#sizes button{font:600 12px Outfit,sans-serif;padding:6px 14px;border-radius:99px;border:1px solid rgba(0,0,0,.35);background:transparent;color:var(--ink);cursor:pointer}
+#sizes button[aria-pressed=true]{background:var(--ink);color:#fff}
+#order{font:600 14px Outfit,sans-serif;padding:14px 30px;border-radius:99px;border:0;background:var(--btn);color:#fff;cursor:pointer;box-shadow:0 8px 20px rgba(0,0,0,.3);transition:transform .2s,background .6s}
+#order:active{transform:scale(.94)}
+#toast{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 24px);left:50%;transform:translate(-50%,90px);background:var(--ink);color:#fff;padding:12px 22px;border-radius:99px;font-size:14px;transition:transform .4s;z-index:5}
+#toast.on{transform:translate(-50%,0)}
+#replay{left:18px;bottom:calc(env(safe-area-inset-bottom,0px) + 18px);font:600 12px Outfit,sans-serif;padding:8px 14px;border-radius:99px;border:1px solid rgba(0,0,0,.3);background:rgba(255,255,255,.4);color:var(--ink);cursor:pointer}
+#err{position:fixed;inset:0;display:none;place-items:center;color:#fff;text-align:center;padding:30px}
+@media (max-aspect-ratio:1/1){#copy{left:7vw;right:7vw;top:auto;bottom:calc(env(safe-area-inset-bottom,0px) + 70px);transform:none;width:auto}h1{font-size:60px}#copy p{margin:10px 0;font-size:13px}#sizes{margin-bottom:14px}}
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div id="err">3D support is needed to see this page. Please open it in a recent Chrome, Safari or Edge.</div>
+<div id="tabs" class="ui"></div>
+<div id="copy" class="ui"><h1 id="name"></h1><p id="desc"></p><div id="sizes"></div><button id="order">Order now</button></div>
+<button id="replay" class="ui">Replay</button>
+<div id="toast"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const F=[
+{n:"Classic Butter",d:"Hot air popped and tossed in slow-melted butter, finished with a pinch of sea salt. The one that started it all.",bg:"#e8c600",s1:"#c8201e",s2:"#f3ecd8",ink:"#1c0d05",btn:"#c8201e",tint:"#f8dd85",tab:"Classic"},
+{n:"Salted Caramel",d:"Small-batch caramel cooked to a deep amber, cracked over every kernel. Crunch first, then melt.",bg:"#e6cf9a",s1:"#5a3416",s2:"#f3e8cc",ink:"#2a1608",btn:"#9a5a1a",tint:"#e0922f",tab:"Caramel"},
+{n:"Peri Peri",d:"Bird's-eye chilli, garlic and a squeeze of lemon, dusted on while it is still hot. Share the first handful.",bg:"#e99a58",s1:"#a61a14",s2:"#1a0f0b",ink:"#1a0f0b",btn:"#1a0f0b",tint:"#e4762c",tab:"Peri Peri"}];
+const SZ=[["Small",.85],["Medium",1],["Large",1.16]];
+const $=id=>document.getElementById(id),T=THREE,rs=document.documentElement.style;
+const e01=x=>x<0?0:x>1?1:x,ease=x=>1-Math.pow(1-e01(x),3),back=x=>{x=e01(x);return 1+2.7*Math.pow(x-1,3)+1.7*Math.pow(x-1,2)},lerp=(a,b,m)=>a+(b-a)*m;
+let R;try{R=new T.WebGLRenderer({antialias:true,alpha:true})}catch(e){$("err").style.display="grid"}
+if(R){
+R.setPixelRatio(Math.min(devicePixelRatio,2));R.outputEncoding=T.sRGBEncoding;R.toneMapping=T.ACESFilmicToneMapping;
+document.body.insertBefore(R.domElement,$("tabs"));
+const sc=new T.Scene(),cam=new T.PerspectiveCamera(32,1,.1,100);
+sc.add(new T.HemisphereLight(0xffffff,0x6a3a22,1.0));
+const key=new T.DirectionalLight(0xfff0d8,1.7);key.position.set(3,5,7);sc.add(key);
+const rim=new T.PointLight(0xff3a20,2.2,22);rim.position.set(5,0,-2);sc.add(rim);
+const tex=c=>{const t=new T.CanvasTexture(c);t.encoding=T.sRGBEncoding;t.anisotropy=8;return t};
+// bucket
+const bc=document.createElement("canvas");bc.width=960;bc.height=256;const bx=bc.getContext("2d"),bt=tex(bc);
+function paint(a,b){for(let i=0;i<24;i++){bx.fillStyle=i%2?b:a;bx.fillRect(i*40,0,40,256)}bt.needsUpdate=true}
+const bucket=new T.Group();sc.add(bucket);
+bucket.add(new T.Mesh(new T.CylinderGeometry(1,.72,1.7,48,1,true),new T.MeshStandardMaterial({map:bt,roughness:.5,side:T.DoubleSide})));
+const rimM=new T.MeshStandardMaterial({color:"#f3ecd8",roughness:.4}),rimMesh=new T.Mesh(new T.TorusGeometry(1,.05,12,64),rimM);rimMesh.rotation.x=Math.PI/2;rimMesh.position.y=.85;bucket.add(rimMesh);
+// kernels
+function kg(){const g=new T.IcosahedronGeometry(.17,1),p=g.attributes.position,m={};for(let i=0;i<p.count;i++){const k=[p.getX(i),p.getY(i),p.getZ(i)].map(v=>v.toFixed(3)).join(),s=m[k]||(m[k]=.72+Math.random()*.6);p.setXYZ(i,p.getX(i)*s,p.getY(i)*s,p.getZ(i)*s)}g.computeVertexNormals();return g}
+const D=new T.Object3D,N=150,pile=new T.InstancedMesh(kg(),new T.MeshStandardMaterial({roughness:.75}),N),vr=[];
+for(let i=0;i<N;i++){const r=Math.sqrt(Math.random())*.9,a=Math.random()*6.28;D.position.set(Math.cos(a)*r,.76+(1-r*r)*.55+Math.random()*.14,Math.sin(a)*r);D.rotation.set(Math.random()*6,Math.random()*6,Math.random()*6);D.scale.setScalar(.9+Math.random()*.7);D.updateMatrix();pile.setMatrixAt(i,D.matrix);vr[i]=.82+Math.random()*.3}
+bucket.add(pile);
+const M=46,fl=new T.InstancedMesh(kg(),new T.MeshStandardMaterial({roughness:.75}),M),P=[];
+for(let i=0;i<M;i++)P.push({p:new T.Vector3(0,-9,0),v:new T.Vector3(),r:new T.Vector3(Math.random()*6,Math.random()*6,0),w:new T.Vector3(Math.random()*6-3,Math.random()*6-3,Math.random()*4-2),s:.6+Math.random()*.7,on:0,g:9});
+sc.add(fl);fl.frustumCulled=false;
+const fm=new T.MeshStandardMaterial({roughness:.75}),fk=new T.Group();sc.add(fk);
+[[-1.3,.1],[-1.6,.6],[1.35,.4],[1.65,0],[.95,.9],[-.8,.8]].forEach(([x,z],i)=>{const m=new T.Mesh(pile.geometry,fm);m.position.set(x,0,z);m.rotation.set(i,i*2,i);m.scale.setScalar(.8+i%3*.2);fk.add(m)});
+function tint(i){const c=new T.Color(F[i].tint),q=new T.Color;fm.color.copy(c);for(let k=0;k<N;k++){q.copy(c).multiplyScalar(vr[k]);pile.setColorAt(k,q)}for(let k=0;k<M;k++){q.copy(c).multiplyScalar(.85+(k%5)*.07);fl.setColorAt(k,q)}pile.instanceColor.needsUpdate=fl.instanceColor.needsUpdate=true}
+let rain=false;
+function burst(){P.forEach(q=>{q.p.set(bucket.position.x+(Math.random()-.5)*1.4,bucket.position.y+1,(Math.random()-.5)*.8);q.v.set((Math.random()-.5)*3.2,4+Math.random()*3.5,(Math.random()-.5)*1.5);q.on=1;q.g=9})}
+// shadow
+const sh=document.createElement("canvas");sh.width=256;sh.height=64;{const x=sh.getContext("2d");x.scale(1,.25);const g=x.createRadialGradient(128,128,0,128,128,128);g.addColorStop(0,"rgba(0,0,0,.55)");g.addColorStop(1,"rgba(0,0,0,0)");x.fillStyle=g;x.fillRect(0,0,256,256)}
+const shadow=new T.Mesh(new T.PlaneGeometry(4,1),new T.MeshBasicMaterial({map:new T.CanvasTexture(sh),transparent:true,depthWrite:false}));shadow.renderOrder=-1;sc.add(shadow);
+// 3D title
+const tc=document.createElement("canvas");tc.width=2048;tc.height=512;const tt=new T.CanvasTexture(tc),title=new T.Group(),layers=[];sc.add(title);
+for(let i=0;i<16;i++){const f=i/15,c=new T.Color("#ecbb83").lerp(new T.Color("#2e1a0c"),Math.pow(f,.6)),m=new T.MeshBasicMaterial({map:tt,color:c,transparent:true,alphaTest:.4});const p=new T.Mesh(new T.PlaneGeometry(8,2),m);p.position.z=-i*.035;title.add(p);layers.push(m)}
+function drawTitle(){const x=tc.getContext("2d");x.clearRect(0,0,2048,512);x.font="400 470px Anton, Impact, sans-serif";x.textAlign="center";x.textBaseline="middle";x.fillStyle="#fff";x.fillText("POPCORN",1024,285);tt.needsUpdate=true}
+// curtain
+const cur=new T.Group();cur.position.z=3;sc.add(cur);const NS=22,strips=[];
+for(let i=0;i<NS;i++){const s=new T.Mesh(new T.PlaneGeometry(1,1),new T.MeshStandardMaterial({color:i%2?"#f1e9d2":"#c8201e",roughness:.55,side:T.DoubleSide}));cur.add(s);strips.push(s)}
+// layout
+let asp=1,base=1,sx=0,sy=0;
+function resize(){const w=innerWidth,h=innerHeight;asp=w/h;R.setSize(w,h);cam.aspect=asp;cam.updateProjectionMatrix();
+ const hh=9*Math.tan(.2793),hw=hh*asp,wide=asp>1.05;base=wide?1:.62;sx=wide?-hw*.46:0;sy=wide?-.1:.85;
+ const ch=6*Math.tan(.2793),cw=ch*asp,sw=2*cw/NS;strips.forEach((s,i)=>{s.scale.set(sw*1.03,ch*2.3,1);s.position.x=-cw+(i+.5)*sw});
+ title.scale.setScalar(Math.min(hw*1.9,8.5)/8)}
+addEventListener("resize",resize);
+// UI
+$("tabs").innerHTML=F.map((f,i)=>`<button role="tab" data-i="${i}">${f.tab}</button>`).join("");
+$("sizes").innerHTML=SZ.map((s,i)=>`<button data-i="${i}">${s[0]}</button>`).join("");
+let cur_=0,sizeT=1,sizeC=1,spin=0,spinT=0,px=0,py=0,shop=0,t0=0,last=0;
+function setF(i,first){cur_=i;const f=F[i];paint(f.s1,f.s2);rimM.color.set(f.s2);tint(i);
+ rs.setProperty("--ink",f.ink);rs.setProperty("--btn",f.btn);if(shop||!first&&shop)$("bg").style.backgroundColor=f.bg;
+ const h=$("name"),d=$("desc");h.classList.add("sw");d.classList.add("sw");
+ setTimeout(()=>{h.innerHTML=f.n.replace(" ","<br>");d.textContent=f.d;h.classList.remove("sw");d.classList.remove("sw")},first?0:230);
+ document.querySelectorAll("#tabs button").forEach((b,j)=>b.setAttribute("aria-selected",j==i));
+ if(!first){spinT+=Math.PI*2;burst()}}
+function setS(i){sizeT=SZ[i][1];document.querySelectorAll("#sizes button").forEach((b,j)=>b.setAttribute("aria-pressed",j==i))}
+$("tabs").onclick=e=>{const b=e.target.closest("button");if(b)setF(+b.dataset.i)};
+$("sizes").onclick=e=>{const b=e.target.closest("button");if(b)setS(+b.dataset.i)};
+$("order").onclick=()=>{const t=$("toast");t.textContent=F[cur_].n+" added to your order";t.classList.add("on");burst();setTimeout(()=>t.classList.remove("on"),2200)};
+addEventListener("pointermove",e=>{px=e.clientX/innerWidth-.5;py=e.clientY/innerHeight-.5});
+function start(){t0=performance.now();shop=0;rain=false;$("bg").style.backgroundColor="#050505";document.querySelectorAll(".ui").forEach(u=>u.classList.remove("on"));P.forEach(q=>q.on=0);setF(0,true)}
+$("replay").onclick=start;
+const O=new T.Object3D;
+function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;const t=(now-t0)/1000;
+ strips.forEach((s,i)=>{const a=ease((t-.2-i*.03)/.8),b=ease((t-2-i*.03)/.8);s.rotation.y=(1-a)*1.5708-b*1.5708;s.visible=t<3.2&&Math.abs(s.rotation.y)<1.55});
+ const m=ease((t-7.2)/1.4);
+ if(t>7.2&&!shop){shop=1;burst();$("bg").style.backgroundColor=F[cur_].bg}
+ if(t>7.7)document.querySelectorAll(".ui").forEach(u=>u.classList.add("on"));
+ rain=t>2.9&&t<7.2;
+ const k=back((t-2.6)/1.1);sizeC+=(sizeT-sizeC)*Math.min(1,dt*6);spin+=(spinT-spin)*Math.min(1,dt*3);
+ const sc2=base*sizeC,bx_=lerp(0,sx,m),rest=lerp(-.4,sy,m);
+ bucket.visible=t>2.5;bucket.position.set(bx_,rest+(1-k)*5,0);bucket.scale.setScalar(sc2);bucket.rotation.y=spin+(1-m)*Math.sin(t*.6)*.3;
+ shadow.position.set(bx_,rest-.85*sc2,-.2);shadow.scale.setScalar(sc2*.9);shadow.visible=k>.92;
+ fk.position.set(bx_,rest-.85*sc2+.12,0);fk.scale.setScalar(sc2*m+.001);
+ const op=ease((t-3)/1)*(1-m);layers.forEach(l=>l.opacity=op);title.visible=op>.01;
+ title.position.set(0,lerp(.85,.85,m)+(asp>1.05?0:.4),-1.6-m*2);title.rotation.set(-py*.12,px*.3,0);
+ cam.position.set(px*.5,1+(-py)*.4,9);cam.lookAt(0,0,0);
+ P.forEach((q,i)=>{if(rain&&!q.on){q.p.set((Math.random()-.5)*3,3.4+Math.random()*3,(Math.random()-.5)*1.5);q.v.set((Math.random()-.5)*.4,-1,0);q.on=1;q.g=3}
+  if(q.on){q.v.y-=q.g*dt;q.p.addScaledVector(q.v,dt);q.r.addScaledVector(q.w,dt);if(q.p.y<-3.2){q.on=0;q.p.y=-9}}
+  O.position.copy(q.p);O.rotation.set(q.r.x,q.r.y,q.r.z);O.scale.setScalar(q.on?q.s:.0001);O.updateMatrix();fl.setMatrixAt(i,O.matrix)});
+ fl.instanceMatrix.needsUpdate=true;R.render(sc,cam)}
+resize();
+document.fonts.load("400 100px Anton").catch(()=>{}).then(()=>{drawTitle();start();last=performance.now();requestAnimationFrame(frame)});
+}
+</script>
+</body>
+</html>
